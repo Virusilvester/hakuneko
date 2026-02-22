@@ -615,7 +615,7 @@ class ElectronPackagerWindows extends ElectronPackager {
     async buildIS(architecture) {
         this._architecture = this.architectures[architecture].is;
 
-        await this._validateCommands('7z --help', 'asar --version', 'innosetup-compiler /?');
+        await this._validateCommands('7z --help', 'asar --version', 'innosetup-compiler --help');
 
         await fs.remove(this._dirBuildRoot);
         await this._bundleElectron(false);
