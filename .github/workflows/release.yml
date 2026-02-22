@@ -39,22 +39,18 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-          cache-dependency-path: |
-            package-lock.json
-            src/app/package-lock.json
 
       - name: Install dependencies (root)
         env:
           npm_config_ignore_scripts: "true"
-        run: npm ci --omit=optional --legacy-peer-deps
+        run: npm install --omit=optional --legacy-peer-deps --no-audit --no-fund
 
       - name: Install dependencies (src/app)
         env:
           npm_config_ignore_scripts: "true"
         run: |
           cd src/app
-          npm ci --omit=optional --legacy-peer-deps
+          npm install --omit=optional --legacy-peer-deps --no-audit --no-fund
 
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'
