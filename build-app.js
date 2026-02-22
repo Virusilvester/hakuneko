@@ -21,6 +21,14 @@ class ElectronPackager {
 
     /**
      *
+     * @param {Error} error
+     */
+    _isMissingRemoteArtifact(error) {
+        return Boolean(error && (error.statusCode === 404 || error.code === 404 || /\\b404\\b/.test(String(error.message))));
+    }
+
+    /**
+     *
      */
     build(architecture) {
         throw new Error('Not implemented!');
@@ -98,10 +106,12 @@ class ElectronPackager {
                         stream.on('error', error => reject(error));
                     } else {
                         console.error('Download Failed!');
-                        reject(new Error('Failed to download electron client!'));
+                        let error = new Error(`Failed to download electron client (${response.statusCode}): ${uri}`);
+                        error.statusCode = response.statusCode;
+                        reject(error);
                     }
                 }
-            });
+            }).on('error', error => reject(error));
         });
     }
 
@@ -282,7 +292,16 @@ class ElectronPackagerLinux extends ElectronPackager {
 
         await fs.remove(this._dirBuildRoot);
         await this._copySkeletonDEB();
-        await this._bundleElectron();
+        try {
+            await this._bundleElectron();
+        } catch(error) {
+            if(this._isMissingRemoteArtifact(error)) {
+                console.warn(`Electron package '${this._architecture.platform}' not available, skip '${this._dirBuildRoot}.deb'`);
+                await fs.remove(this._dirBuildRoot);
+                return;
+            }
+            throw error;
+        }
         await this._bundleFFMPEG(this._architecture.name);
         await this._bundleImageMagick(this._architecture.name);
         await this._bundleKindleGenerate(this._architecture.name);
@@ -311,7 +330,16 @@ class ElectronPackagerLinux extends ElectronPackager {
 
         await fs.remove(this._dirBuildRoot);
         await this._copySkeletonRPM();
-        await this._bundleElectron();
+        try {
+            await this._bundleElectron();
+        } catch(error) {
+            if(this._isMissingRemoteArtifact(error)) {
+                console.warn(`Electron package '${this._architecture.platform}' not available, skip '${this._dirBuildRoot}.rpm'`);
+                await fs.remove(this._dirBuildRoot);
+                return;
+            }
+            throw error;
+        }
         await this._bundleFFMPEG(this._architecture.name);
         await this._bundleImageMagick(this._architecture.name);
         await this._bundleKindleGenerate(this._architecture.name);
