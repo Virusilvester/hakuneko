@@ -1,6 +1,22 @@
 const discordPresenceId = '726702836775256094';
-const DiscordRPC = require('discord-rpc');
-DiscordRPC.register(discordPresenceId);
+let DiscordRPC = null;
+
+function getDiscordRPC() {
+    if(DiscordRPC) {
+        return DiscordRPC;
+    }
+    try {
+        DiscordRPC = require('discord-rpc');
+        try {
+            DiscordRPC.register && DiscordRPC.register(discordPresenceId);
+        } catch(error) {
+            // ignore, `register-scheme` peer dependency may be missing
+        }
+        return DiscordRPC;
+    } catch(error) {
+        return null;
+    }
+}
 
 export default class DiscordPresence {
 
@@ -115,7 +131,12 @@ export default class DiscordPresence {
         if(this.rpc) {
             return; // already running ...
         }
-        this.rpc = new DiscordRPC.Client({ transport: 'ipc' });
+        let rpc = getDiscordRPC();
+        if(!rpc) {
+            console.warn('WARNING: DiscordPresence - discord-rpc is not available.');
+            return;
+        }
+        this.rpc = new rpc.Client({ transport: 'ipc' });
         this.rpc.on('ready', () => {
             this.status.startTimestamp = + new Date();
 

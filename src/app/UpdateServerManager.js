@@ -1,4 +1,4 @@
-const url = require('url');
+const { URL, urlToHttpOptions } = require('url');
 const http = require('http');
 const https = require('https');
 const { ConsoleLogger } = require('@logtrine/logtrine');
@@ -9,8 +9,7 @@ module.exports = class UpdateServerManager {
     constructor(applicationUpdateURL, logger) {
         try {
             this._logger = logger || new ConsoleLogger(ConsoleLogger.LEVEL.Warn);
-            // NOTE: simple hack to check if URL is valid (must not throw error)
-            url.parse(applicationUpdateURL, true).hostname.length;
+            new URL(applicationUpdateURL);
             this._applicationUpdateURL = applicationUpdateURL;
         } catch(error) {
             this._logger.warn('Initialization of "UpdateServerManager" failed!', error);
@@ -22,18 +21,29 @@ module.exports = class UpdateServerManager {
      *
      * @param {string | URL | RequestOptions} options
      */
-    _getClient(options) {
-        let uri = '';
+    _toURL(options) {
+        if(options instanceof URL) {
+            return options;
+        }
+
+        let uri = undefined;
         if(typeof options === 'string') {
             uri = options;
+        } else if(options && typeof options.href === 'string') {
+            uri = options.href;
+        } else if(options && typeof options.url === 'string') {
+            uri = options.url;
         }
-        if(typeof options['href'] === 'string') {
-            uri = options['href'];
+
+        if(!uri) {
+            throw new Error('Invalid request for connection to the update server!');
         }
-        if(typeof options['url'] === 'string') {
-            uri = options['url'];
+
+        try {
+            return new URL(uri);
+        } catch(error) {
+            throw new Error('Invalid URL: ' + uri);
         }
-        return uri.startsWith('https:') ? https : http;
     }
 
     /**
@@ -45,9 +55,19 @@ module.exports = class UpdateServerManager {
             if(!options) {
                 throw new Error('Invalid request for connection to the update server!');
             }
-            let request = this._getClient(options).request(options, response => {
-                if(response.headers.location && response.headers.location.startsWith('http')) {
-                    this._request(response.headers.location)
+            let uri = this._toURL(options);
+            let client = uri.protocol === 'https:' ? https : http;
+            let request = client.request({
+                ...urlToHttpOptions(uri),
+                agent: false,
+                headers: {
+                    'connection': 'close'
+                }
+            }, response => {
+                if(response.headers.location) {
+                    let location = response.headers.location;
+                    let redirect = location.startsWith('http') ? new URL(location) : new URL(location, uri);
+                    this._request(redirect)
                         .then(data => resolve(data))
                         .catch(error => reject(error));
                     return;
@@ -74,7 +94,8 @@ module.exports = class UpdateServerManager {
         return this._request(this._applicationUpdateURL)
             .then(data => {
                 let link = data.toString('utf8').trim();
-                let info = new UpdatePackageInfo(link.split('.')[0], url.parse(link, true).query.signature, url.resolve(this._applicationUpdateURL, link));
+                let signature = new URL(link, this._applicationUpdateURL).searchParams.get('signature');
+                let info = new UpdatePackageInfo(link.split('.')[0], signature, new URL(link, this._applicationUpdateURL).toString());
                 return Promise.resolve(info);
             });
     }

@@ -6,12 +6,24 @@ const urlFilterAll = { urls: ['http://*/*', 'https://*/*'] };
 const trayTooltipMinimize = 'HakuNeko\nClick to hide window';
 const trayTooltipRestore = 'HakuNeko\nClick to show window';
 
+function getRemoteMain() {
+    if(!process.versions || !process.versions.electron) {
+        return null;
+    }
+    try {
+        return require('@electron/remote/main');
+    } catch(error) {
+        return null;
+    }
+}
+
 module.exports = class ElectronBootstrap {
 
     constructor(configuration, logger) {
         this._logger = logger || new ConsoleLogger(ConsoleLogger.LEVEL.Warn);
         this._configuration = configuration;
         this._window = null;
+        this._remoteInitialized = false;
         this._schemes = [
             {
                 scheme: this._configuration.applicationProtocol,
@@ -52,6 +64,27 @@ module.exports = class ElectronBootstrap {
         // update userdata path (e.g. for portable version)
         electron.app.setPath('userData', this._configuration.applicationUserDataDirectory);
 
+        // @electron/remote setup (shimmed into render process via preload.js)
+        // Must be initialized before creating any BrowserWindow.
+        if(!this._remoteInitialized) {
+            this._remoteInitialized = true;
+            let remoteMain = getRemoteMain();
+            if(remoteMain) {
+                try {
+                    remoteMain.initialize();
+                } catch (error) {
+                    this._logger.warn(error);
+                }
+                electron.app.on('browser-window-created', (event, window) => {
+                    try {
+                        remoteMain.enable(window.webContents);
+                    } catch (error) {
+                        this._logger.warn(error);
+                    }
+                });
+            }
+        }
+
         /*
          * HACK: Create a dummy menu to support local hotkeys (only accessable when app is focused)
          *       This has to be done, because F12 key cannot be used as global key in windows
@@ -81,12 +114,12 @@ module.exports = class ElectronBootstrap {
      *
      */
     _registerCacheProtocol() {
-        electron.protocol.registerBufferProtocol(this._configuration.applicationProtocol, async (request, callback) => {
+        electron.protocol.handle(this._configuration.applicationProtocol, async (request) => {
             try {
                 let uri = new URL(request.url);
                 let endpoint = path.join(this._directoryMap[uri.hostname], path.normalize(uri.pathname));
                 if(!await fs.exists(endpoint)) {
-                    throw -6; // https://cs.chromium.org/chromium/src/net/base/net_error_list.h
+                    return new Response(undefined, { status: 404 });
                 }
                 let stats = await fs.stat(endpoint);
                 let mime;
@@ -99,22 +132,42 @@ module.exports = class ElectronBootstrap {
                     mime = endpoint.endsWith('.mjs') ? 'text/javascript' : undefined;
                     buffer = await fs.readFile(endpoint);
                 }
-                callback({
-                    mimeType: mime, // leaving this blank seems to use autodetect
-                    data: buffer
-                });
+
+                if(!buffer) {
+                    return new Response(undefined, { status: 404 });
+                }
+
+                let headers = {};
+                if(mime) {
+                    headers['content-type'] = mime;
+                }
+                return new Response(buffer, { headers });
             } catch(error) {
-                callback(error);
+                this._logger.warn(error);
+                return new Response(undefined, { status: 500 });
             }
         });
     }
 
     _registerConnectorProtocol() {
-        electron.protocol.registerBufferProtocol(this._configuration.connectorProtocol, async (request, callback) => {
+        electron.protocol.handle(this._configuration.connectorProtocol, async (request) => {
             try {
-                callback(await this._ipcSend('on-connector-protocol-handler', request));
+                let result = await this._ipcSend('on-connector-protocol-handler', {
+                    url: request.url,
+                    method: request.method,
+                    headers: Object.fromEntries(request.headers.entries())
+                });
+                if(!result || !result.data) {
+                    return new Response(undefined, { status: 404 });
+                }
+                let headers = {};
+                if(result.mimeType) {
+                    headers['content-type'] = result.mimeType;
+                }
+                return new Response(result.data, { headers });
             } catch(error) {
-                callback(undefined);
+                this._logger.warn(error);
+                return new Response(undefined, { status: 500 });
             }
         });
     }
@@ -257,7 +310,10 @@ module.exports = class ElectronBootstrap {
             backgroundColor: '#f8f8f8',
             webPreferences: {
                 experimentalFeatures: true,
+                preload: path.join(__dirname, 'preload.js'),
                 nodeIntegration: true,
+                contextIsolation: false,
+                sandbox: false,
                 webSecurity: false // required to open local images in browser
             },
             frame: false
