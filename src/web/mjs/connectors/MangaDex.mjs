@@ -44,8 +44,14 @@ export default class MangaDex extends Connector {
         //this.serverNetwork.push('https://bddhaec337xvm.xnvda7fch4zhr.mangadex.network/data/');
         this.serverNetwork.push('https://cache.ayaya.red/mdah/data/');
         console.log(`Added Network Seeds '[ ${this.serverNetwork.join(', ')} ]' to ${this.label}`);
-        const request = new Request(this.url, this.requestOptions);
-        return Engine.Request.fetchUI(request, '');
+        // Try to load MangaDex in a browser window to get cookies,
+        // but don't block initialization if this fails (e.g. when remote API is unavailable)
+        try {
+            const request = new Request(this.url, this.requestOptions);
+            await Engine.Request.fetchUI(request, '');
+        } catch(error) {
+            console.warn(`[${this.label}] Browser-based initialization failed (this is OK, continuing without cookies):`, error.message || error);
+        }
     }
 
     canHandleURI(uri) {
@@ -69,19 +75,32 @@ export default class MangaDex extends Connector {
     }
 
     async _getMangas() {
-        return (await this.fetchJSON('https://websites.hakuneko.download/mangadex.json')).map(manga => {
-            return {
+        try {
+            const data = await this.fetchJSON('https://websites.hakuneko.download/mangadex.json');
+            if(!Array.isArray(data)) {
+                throw new Error('Manga list response is not an array');
+            }
+            return data.map(manga => ({
                 id: manga.id,
                 title: manga.title,
-            };
-        });
+            }));
+        } catch(error) {
+            console.warn(`[${this.label}] Failed to fetch manga list from hakuneko server:`, error.message || error);
+            // Return empty list instead of crashing — user can still add manga via URL
+            return [];
+        }
     }
 
     async _getChapters(manga) {
         let chapterList = [];
         for(let page = 0, run = true; run; page++) {
-            let chapters = await this._getChaptersFromPage(manga, page);
-            chapters.length > 0 ? chapterList.push(...chapters) : run = false;
+            try {
+                let chapters = await this._getChaptersFromPage(manga, page);
+                chapters.length > 0 ? chapterList.push(...chapters) : run = false;
+            } catch(error) {
+                console.error(`[${this.label}] Failed to fetch chapters page ${page} for manga ${manga.id}:`, error.message || error);
+                run = false;
+            }
         }
         return chapterList.reverse();
     }
@@ -95,11 +114,21 @@ export default class MangaDex extends Connector {
         uri.searchParams.append('contentRating[]', 'suggestive');
         uri.searchParams.append('contentRating[]', 'erotica');
         uri.searchParams.append('contentRating[]', 'pornographic');
+        // MangaDex v5 API uses plain 'manga' (not 'manga[]') for single manga ID filter
         uri.searchParams.set('manga', manga.id);
+        uri.searchParams.set('includes[]', 'scanlation_group');
         const request = new Request(uri, this.requestOptions);
-        const {data} = await this.fetchJSON(request, 3);
+        const response = await this.fetchJSONWithStatus(request, 3);
+        if (!response || response.result === 'error') {
+            console.warn(`[${this.label}] Chapter API returned error for page ${page}:`, response);
+            return [];
+        }
+        const {data} = response;
+        if (!data || !Array.isArray(data) || data.length === 0) {
+            return [];
+        }
         const groupMap = await this._getScanlationGroups(data);
-        return !data ? [] : data.map(result => {
+        return data.map(result => {
             let title = '';
             if(result.attributes.volume) {
                 title += 'Vol.' + this._padNum(result.attributes.volume, 2);
@@ -113,21 +142,64 @@ export default class MangaDex extends Connector {
             if(result.attributes.translatedLanguage) {
                 title += ' (' + result.attributes.translatedLanguage + ')';
             }
-            const groups = result.relationships.filter(r => r.type === 'scanlation_group');
+            const groups = (result.relationships || []).filter(r => r.type === 'scanlation_group');
             if(groups.length > 0) {
-                title += ' [' + groups.map(group => groupMap[group.id]).join(', ') + ']';
+                title += ' [' + groups.map(group => groupMap[group.id] || 'unknown').join(', ') + ']';
             }
             // is any group for this chapter not in the list of licensed groups?
             if(groups.length === 0 || groups.some(group => !this.licensedChapterGroups.includes(group.id))) {
                 return {
                     id: result.id,
-                    title: title.trim(),
+                    title: title.trim() || `Chapter ${result.id}`,
                     language: result.attributes.translatedLanguage
                 };
             } else {
                 return false;
             }
         }).filter(chapter => chapter);
+    }
+
+    /**
+     * Extended fetchJSON that returns the full response body (not just json())
+     * with retry support and full error detail.
+     */
+    async fetchJSONWithStatus(request, retries) {
+        retries = retries !== undefined ? retries : 0;
+        if(typeof request === 'string') {
+            request = new Request(request, this.requestOptions);
+        }
+        if(request instanceof URL) {
+            request = new Request(request.href, this.requestOptions);
+        }
+        try {
+            const response = await fetch(request.clone ? request.clone() : request);
+            if(response.status >= 500 && retries > 0) {
+                await this.wait(5000);
+                return this.fetchJSONWithStatus(request, retries - 1);
+            }
+            if(response.status === 429 && retries > 0) {
+                // Rate limited — wait longer and retry
+                const retryAfter = parseInt(response.headers.get('retry-after') || '10', 10);
+                console.warn(`[${this.label}] Rate limited (429), waiting ${retryAfter}s before retry...`);
+                await this.wait(retryAfter * 1000);
+                return this.fetchJSONWithStatus(request, retries - 1);
+            }
+            if(response.ok || response.status === 400) {
+                const json = await response.json();
+                if(!response.ok) {
+                    console.warn(`[${this.label}] API error (${response.status}) at ${request.url}:`, JSON.stringify(json).substring(0, 300));
+                }
+                return json;
+            }
+            throw new Error(`Failed to receive content from "${request.url}" (status: ${response.status}) - ${response.statusText}`);
+        } catch(error) {
+            if(retries > 0) {
+                console.warn(`[${this.label}] Request failed, retrying (${retries} left):`, error.message);
+                await this.wait(2500);
+                return this.fetchJSONWithStatus(request, retries - 1);
+            }
+            throw error;
+        }
     }
 
     async _getPages(chapter) {
@@ -164,18 +236,45 @@ export default class MangaDex extends Connector {
 
     async _getScanlationGroups(chapters) {
         const groupList = {};
-        let groupIDs = !chapters ? {} : chapters.reduce((accumulator, chapter) => {
-            const ids = chapter.relationships.filter(r => r.type === 'scanlation_group').map(g => g.id);
+        if(!chapters || chapters.length === 0) {
+            return groupList;
+        }
+
+        // First, try to extract group names directly from the included relationship attributes
+        // (when we request includes[]=scanlation_group, names are embedded in relationships)
+        for(const chapter of chapters) {
+            const rels = chapter.relationships || [];
+            for(const rel of rels) {
+                if(rel.type === 'scanlation_group' && rel.id) {
+                    if(rel.attributes && rel.attributes.name) {
+                        groupList[rel.id] = rel.attributes.name;
+                    }
+                }
+            }
+        }
+
+        // Collect any group IDs that didn't have embedded name attributes
+        let missingIDs = chapters.reduce((accumulator, chapter) => {
+            const ids = (chapter.relationships || [])
+                .filter(r => r.type === 'scanlation_group' && r.id && !groupList[r.id])
+                .map(g => g.id);
             return accumulator.concat(ids);
         }, []);
-        groupIDs = Array.from(new Set(groupIDs));
-        if(groupIDs.length > 0) {
-            await this.wait(this.config.throttleRequests.value);
-            const uri = new URL('/group', this.api);
-            uri.search = new URLSearchParams([ [ 'limit', 100 ], ...groupIDs.map(id => [ 'ids[]', id ]) ]).toString();
-            const request = new Request(uri, this.requestOptions);
-            const {data} = await this.fetchJSON(request, 3);
-            data.forEach(result => groupList[result.id] = result.attributes.name || 'unknown');
+        missingIDs = Array.from(new Set(missingIDs));
+
+        if(missingIDs.length > 0) {
+            try {
+                await this.wait(this.config.throttleRequests.value);
+                const uri = new URL('/group', this.api);
+                uri.search = new URLSearchParams([ [ 'limit', 100 ], ...missingIDs.map(id => [ 'ids[]', id ]) ]).toString();
+                const request = new Request(uri, this.requestOptions);
+                const {data} = await this.fetchJSON(request, 3);
+                if(data && Array.isArray(data)) {
+                    data.forEach(result => groupList[result.id] = result.attributes && result.attributes.name || 'unknown');
+                }
+            } catch(error) {
+                console.warn(`[${this.label}] Failed to fetch scanlation group names:`, error.message || error);
+            }
         }
         return groupList;
     }

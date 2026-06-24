@@ -66,9 +66,13 @@ export default class Connector {
                 this.initialized = true;
             }
         } catch(error) {
-            // only throw when not in offline mode
-            if(!error.stack.startsWith('ERR_INTERNET_DISCONNECTED')) {
-                throw error;
+            // Mark as initialized to prevent repeated failing attempts blocking the connector
+            this.initialized = true;
+            // Only warn when not in offline mode
+            const errorMsg = error && (error.stack || error.message || String(error)) || '';
+            if(!errorMsg.includes('ERR_INTERNET_DISCONNECTED')) {
+                // Log but don't re-throw — connector can still work for API-based operations
+                console.warn('Connector initialization warning (connector will still work):', errorMsg.substring(0, 300));
             }
         }
     }

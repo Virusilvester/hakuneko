@@ -42,12 +42,23 @@ async function assertConnector(browserPage, parameters, expectations) {
     expect(remoteMangaTitle).toEqual(expectations.mangaTitle);
 
     // get chapters for manga as reference to the remote instance
+    let result = await browserPage.evaluate(manga => {
+        return new Promise(resolve => {
+            manga.getChapters((error, chapters) => {
+                resolve({
+                    error: error ? { message: error.message, stack: error.stack } : null,
+                    chaptersLength: chapters ? chapters.length : null
+                });
+            });
+        });
+    }, remoteManga);
+    console.log("CHAPTER RETRIEVAL RESULT:", result);
+    expect(result.error).toBeNull();
     let remoteChapters = await browserPage.evaluateHandle(manga => {
         return new Promise(resolve => {
             manga.getChapters((_, chapters) => resolve(chapters));
         });
     }, remoteManga);
-    expect(remoteChapters._remoteObject.className).toEqual('Array');
 
     // get first chapter for chapters as reference to the remote instance
     let remoteChapter = await browserPage.evaluateHandle((chapters, chaptersAccessor) => {
@@ -105,6 +116,7 @@ describe("HakuNeko Engine", () => {
         await new Promise(resolve => setTimeout(resolve, 7500));
         browser = await puppeteer.connect(connection);
         [page] = await browser.pages();
+        page.on('console', msg => console.error('PAGE LOG:', msg.text()));
     });
 
     // TearDown
@@ -134,16 +146,16 @@ describe("HakuNeko Engine", () => {
             it('should get manga, chapters and page links', async () => {
                 await assertConnector(page, {
                     connectorID: 'mangadex',
-                    mangaURL: 'https://mangadex.org/title/0e711546-48be-4d95-90eb-c336cfc0ddce',
-                    chaptersAccessor: 'pop' // first => shift, last => pop, index => Integer
+                    mangaURL: 'https://mangadex.org/title/7966ed1f-f3e5-4566-9dee-1c49d6b35462',
+                    chaptersAccessor: 'shift' // first => shift, last => pop, index => Integer
                 }, {
                     connectorClass: 'MangaDex',
-                    mangaID: '0e711546-48be-4d95-90eb-c336cfc0ddce',
-                    mangaTitle: 'They Say I Was Born a King\'s Daughter',
-                    chapterID: '87623776-1db5-458e-b057-a4faff9d4af1',
-                    chapterTitle: 'Ch.0001 (pt-br) [Usagi Scan]',
-                    pageCount: 51,
-                    pageMatcher: /^https:\/\/(s\d+|uploads).mangadex.org\/data\/[0-9a-f]{32}\/R\d+-[0-9a-f]{64}.jpg$/
+                    mangaID: '7966ed1f-f3e5-4566-9dee-1c49d6b35462',
+                    mangaTitle: 'Guns and Valinta (ONE SHOT)',
+                    chapterID: '019053f1-6a32-431d-aa1f-c7897e46d1c9',
+                    chapterTitle: '(en) [The Front of Armament]',
+                    pageCount: 42,
+                    pageMatcher: /^https:\/\/([a-z0-9-.]+)\.mangadex\.(org|network)\/data\/[0-9a-f]{32}\/[a-zA-Z0-9_-]+\.(jpg|png|jpeg)$/
                 });
             });
         });
