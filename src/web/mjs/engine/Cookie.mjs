@@ -39,15 +39,25 @@ export default class Cookie {
     }
 
     static applyCrossSiteCookies(headers) {
-        let cookies = headers['set-cookie'] || headers['Set-Cookie'];
+        const key = Object.keys(headers).find(k => k.toLowerCase() === 'set-cookie');
+        if(!key) {
+            return;
+        }
+        let cookies = headers[key];
         if(!cookies) {
             return;
         }
         if(!Array.isArray(cookies)) {
             cookies = [ cookies ];
         }
-        for(let index in cookies) {
-            cookies[index] = [ ...cookies[index].split(';').map(part => part.trim()).filter(part => !/^SameSite=/i.test(part)), 'SameSite=None' ].join('; ');
-        }
+        const updated = cookies.map(cookie => {
+            let parts = cookie.split(';').map(part => part.trim());
+            // Filter out existing SameSite and Secure to prevent duplicates
+            parts = parts.filter(part => !/^SameSite=/i.test(part) && !/^Secure/i.test(part));
+            parts.push('SameSite=None');
+            parts.push('Secure');
+            return parts.join('; ');
+        });
+        headers[key] = updated;
     }
 }

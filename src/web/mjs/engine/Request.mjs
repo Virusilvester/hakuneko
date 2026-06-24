@@ -422,6 +422,24 @@ export default class Request {
     async onBeforeSendHeadersHandler(details) {
         let uri = new URL(details.url);
 
+        // Helper to find a key case-insensitively
+        const getHeaderKey = (headers, name) => Object.keys(headers).find(k => k.toLowerCase() === name.toLowerCase());
+        const getHeader = (headers, name) => headers[getHeaderKey(headers, name)];
+        const setHeader = (headers, name, value) => {
+            const key = getHeaderKey(headers, name);
+            if(key) {
+                headers[key] = value;
+            } else {
+                headers[name] = value;
+            }
+        };
+        const deleteHeader = (headers, name) => {
+            const key = getHeaderKey(headers, name);
+            if(key) {
+                delete headers[key];
+            }
+        };
+
         // Remove accidently added headers from opened developer console
         for (let header in details.requestHeaders) {
             if (header.startsWith('X-DevTools')) {
@@ -430,24 +448,28 @@ export default class Request {
         }
 
         // Overwrite the Host header with the one provided by the connector
-        if (details.requestHeaders['x-host']) {
-            details.requestHeaders['Host'] = details.requestHeaders['x-host'];
+        const xHost = getHeader(details.requestHeaders, 'x-host');
+        if (xHost) {
+            setHeader(details.requestHeaders, 'Host', xHost);
         }
-        delete details.requestHeaders['x-host'];
+        deleteHeader(details.requestHeaders, 'x-host');
 
         // Always overwrite the electron user agent
-        if (details.requestHeaders['User-Agent'].toLowerCase().includes('electron')) {
-            details.requestHeaders['User-Agent'] = this.userAgent;
+        const ua = getHeader(details.requestHeaders, 'User-Agent') || '';
+        if (ua.toLowerCase().includes('electron')) {
+            setHeader(details.requestHeaders, 'User-Agent', this.userAgent);
         }
         // If a custom user agent is set use this instead
-        if (details.requestHeaders['x-user-agent']) {
-            details.requestHeaders['User-Agent'] = details.requestHeaders['x-user-agent'];
-            delete details.requestHeaders['x-user-agent'];
+        const xUA = getHeader(details.requestHeaders, 'x-user-agent');
+        if (xUA) {
+            setHeader(details.requestHeaders, 'User-Agent', xUA);
         }
+        deleteHeader(details.requestHeaders, 'x-user-agent');
 
         // Prevent loading anything from cache (espacially CloudFlare protection)
-        details.requestHeaders['Cache-Control'] = details.requestHeaders['no-cache'];
-        details.requestHeaders['Pragma'] = details.requestHeaders['no-cache'];
+        const cacheControlVal = getHeader(details.requestHeaders, 'Cache-Control') || 'no-cache';
+        setHeader(details.requestHeaders, 'Cache-Control', cacheControlVal);
+        setHeader(details.requestHeaders, 'Pragma', 'no-cache');
 
         /*
          * Overwrite the Referer header, but
@@ -455,62 +477,75 @@ export default class Request {
          */
         if (!/(ch[kl]_jschl|challenge-platform)/i.test(uri.href)) {
             if (uri.hostname.includes('.mcloud.to')) {
-                details.requestHeaders['Referer'] = uri.href;
-            } else if (details.requestHeaders['x-referer']) {
-                details.requestHeaders['Referer'] = details.requestHeaders['x-referer'];
+                setHeader(details.requestHeaders, 'Referer', uri.href);
+            } else {
+                const xReferer = getHeader(details.requestHeaders, 'x-referer');
+                if (xReferer) {
+                    setHeader(details.requestHeaders, 'Referer', xReferer);
+                }
             }
         }
-        delete details.requestHeaders['x-referer'];
+        deleteHeader(details.requestHeaders, 'x-referer');
 
         // Overwrite the Origin header
-        if (details.requestHeaders['x-origin']) {
-            details.requestHeaders['Origin'] = details.requestHeaders['x-origin'];
+        const xOrigin = getHeader(details.requestHeaders, 'x-origin');
+        if (xOrigin) {
+            setHeader(details.requestHeaders, 'Origin', xOrigin);
         }
-        delete details.requestHeaders['x-origin'];
+        deleteHeader(details.requestHeaders, 'x-origin');
 
         // Append Cookie header
-        if (details.requestHeaders['x-cookie']) {
-            let cookiesORG = new Cookie(details.requestHeaders['Cookie']);
-            let cookiesNEW = new Cookie(details.requestHeaders['x-cookie']);
-            details.requestHeaders['Cookie'] = cookiesORG.merge(cookiesNEW).toString();
+        const xCookie = getHeader(details.requestHeaders, 'x-cookie');
+        if (xCookie) {
+            const orgCookieVal = getHeader(details.requestHeaders, 'Cookie');
+            let cookiesORG = new Cookie(orgCookieVal);
+            let cookiesNEW = new Cookie(xCookie);
+            setHeader(details.requestHeaders, 'Cookie', cookiesORG.merge(cookiesNEW).toString());
         }
-        delete details.requestHeaders['x-cookie'];
+        deleteHeader(details.requestHeaders, 'x-cookie');
 
         //
-        if (details.requestHeaders['x-sec-fetch-dest']) {
-            details.requestHeaders['Sec-Fetch-Dest'] = details.requestHeaders['x-sec-fetch-dest'];
+        const xSecDest = getHeader(details.requestHeaders, 'x-sec-fetch-dest');
+        if (xSecDest) {
+            setHeader(details.requestHeaders, 'Sec-Fetch-Dest', xSecDest);
         }
-        delete details.requestHeaders['x-sec-fetch-dest'];
+        deleteHeader(details.requestHeaders, 'x-sec-fetch-dest');
 
         //
-        if (details.requestHeaders['x-sec-fetch-mode']) {
-            details.requestHeaders['Sec-Fetch-Mode'] = details.requestHeaders['x-sec-fetch-mode'];
+        const xSecMode = getHeader(details.requestHeaders, 'x-sec-fetch-mode');
+        if (xSecMode) {
+            setHeader(details.requestHeaders, 'Sec-Fetch-Mode', xSecMode);
         }
-        delete details.requestHeaders['x-sec-fetch-mode'];
+        deleteHeader(details.requestHeaders, 'x-sec-fetch-mode');
 
         //
-        if (details.requestHeaders['x-sec-fetch-site']) {
-            details.requestHeaders['Sec-Fetch-Site'] = details.requestHeaders['x-sec-fetch-site'];
+        const xSecSite = getHeader(details.requestHeaders, 'x-sec-fetch-site');
+        if (xSecSite) {
+            setHeader(details.requestHeaders, 'Sec-Fetch-Site', xSecSite);
         }
-        delete details.requestHeaders['x-sec-fetch-site'];
+        deleteHeader(details.requestHeaders, 'x-sec-fetch-site');
 
         //
-        if (details.requestHeaders['x-sec-ch-ua']) {
-            details.requestHeaders['sec-ch-ua'] = details.requestHeaders['x-sec-ch-ua'];
+        const xSecUA = getHeader(details.requestHeaders, 'x-sec-ch-ua');
+        if (xSecUA) {
+            setHeader(details.requestHeaders, 'sec-ch-ua', xSecUA);
         }
-        delete details.requestHeaders['x-sec-ch-ua'];
+        deleteHeader(details.requestHeaders, 'x-sec-ch-ua');
 
         // HACK: Imgur does not support request with accept types containing other mimes then images
         //       => overwrite accept header to prevent redirection to HTML notice
         if (/i\.imgur\.com/i.test(uri.hostname) || /\.(jpg|jpeg|png|gif|webp)/i.test(uri.pathname)) {
-            details.requestHeaders['Accept'] = 'image/webp,image/apng,image/*,*/*';
-            delete details.requestHeaders['accept'];
+            setHeader(details.requestHeaders, 'Accept', 'image/webp,image/apng,image/*,*/*');
+            deleteHeader(details.requestHeaders, 'accept');
         }
 
         // Avoid detection of HakuNeko through lowercase accept header
-        if (details.requestHeaders['accept']) {
-            details.requestHeaders['Accept'] = details.requestHeaders['accept'];
-            delete details.requestHeaders['accept'];
+        const acceptVal = getHeader(details.requestHeaders, 'accept');
+        if (acceptVal) {
+            setHeader(details.requestHeaders, 'Accept', acceptVal);
+            if (getHeaderKey(details.requestHeaders, 'accept') !== 'Accept') {
+                deleteHeader(details.requestHeaders, 'accept');
+            }
         }
 
         return details;
