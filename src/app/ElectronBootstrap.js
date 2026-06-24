@@ -426,14 +426,57 @@ module.exports = class ElectronBootstrap {
         });
     }
 
+    _cloneHeaders(headers) {
+        let result = {};
+        for(let name in headers || {}) {
+            let value = headers[name];
+            if(Array.isArray(value)) {
+                result[name] = value.map(item => item == null ? item : item.toString());
+            } else {
+                result[name] = value == null ? value : value.toString();
+            }
+        }
+        return result;
+    }
+
+    _cloneWebRequestDetails(details) {
+        let result = {};
+        for(let name of [
+            'id',
+            'url',
+            'method',
+            'resourceType',
+            'referrer',
+            'timestamp',
+            'webContentsId',
+            'frameId',
+            'parentFrameId',
+            'statusCode',
+            'statusLine',
+            'fromCache',
+            'ip'
+        ]) {
+            if(details[name] !== undefined) {
+                result[name] = details[name];
+            }
+        }
+        if(details.requestHeaders) {
+            result.requestHeaders = this._cloneHeaders(details.requestHeaders);
+        }
+        if(details.responseHeaders) {
+            result.responseHeaders = this._cloneHeaders(details.responseHeaders);
+        }
+        return result;
+    }
+
     _setupBeforeSendHeaders() {
         // inject headers before a request is made (call the handler in the webapp to do the dirty work)
         electron.session.defaultSession.webRequest.onBeforeSendHeaders(urlFilterAll, async (details, callback) => {
             try {
-                let result = await this._ipcSend('on-before-send-headers', details);
+                let result = await this._ipcSend('on-before-send-headers', this._cloneWebRequestDetails(details));
                 callback({
                     cancel: false,
-                    requestHeaders: result.requestHeaders
+                    requestHeaders: result && result.requestHeaders || details.requestHeaders
                 });
             } catch(error) {
                 this._logger.warn(error);
@@ -448,10 +491,10 @@ module.exports = class ElectronBootstrap {
     _setupHeadersReceived() {
         electron.session.defaultSession.webRequest.onHeadersReceived(urlFilterAll, async (details, callback) => {
             try {
-                let result = await this._ipcSend('on-headers-received', details);
+                let result = await this._ipcSend('on-headers-received', this._cloneWebRequestDetails(details));
                 callback({
                     cancel: false,
-                    responseHeaders: result.responseHeaders
+                    responseHeaders: result && result.responseHeaders || details.responseHeaders
                     // statusLine
                 });
             } catch(error) {

@@ -29,20 +29,11 @@ export default class Storage {
         // TODO: Use fs-extra which provides more convenience functions (e.g. delete recursive)
         this.fs = require('fs');
         this.path = require('path');
+        this.url = require('url');
         this.config = this.path.join(electron.remote.app.getPath('userData'), 'hakuneko.');
         this.temp = this.path.join(require('os').tmpdir(), 'hakuneko');
         this._createDirectoryChain(this.temp);
-
         this.pdfTargetHeight = 1600;
-        this.fileURISubstitutions = {
-            rgx: /['#?;]/g,
-            map: {
-                '\'': '%27',
-                '#': '%23',
-                '?': '%3F',
-                ';': '%3B'
-            }
-        };
     }
 
     /**
@@ -415,9 +406,7 @@ export default class Storage {
      *
      */
     _makeValidFileURL(directory, file) {
-        return encodeURI('file://' + this.path.join(directory, file).replace(/\\/g, '/'))
-            // some special cases are not covered with encodeURI and needs to be replaced manually
-            .replace(this.fileURISubstitutions.rgx, m => this.fileURISubstitutions.map[m]);
+        return this.url.pathToFileURL(this.path.join(directory, file)).href;
     }
 
     /**

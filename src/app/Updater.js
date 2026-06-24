@@ -19,6 +19,10 @@ module.exports = class Updater {
      */
     async updateCache(pubkey) {
         try {
+            if(this._serverManager.isDisabled) {
+                this._logger.info('Update Disabled');
+                return;
+            }
             this._logger.info('Checking for Update...');
             let updateInfo = await this._serverManager.getUpdateInfo();
             this._logger.info('Remote Version:', updateInfo.version);

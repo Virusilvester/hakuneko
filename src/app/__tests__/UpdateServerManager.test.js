@@ -111,6 +111,12 @@ describe('UpdateServerManager', function () {
             let testee = new UpdateServerManager(123, logger);
             assert.equal(testee._applicationUpdateURL, undefined);
         });
+
+        it('should disable update checks when URL is DISABLED', async () => {
+            let testee = new UpdateServerManager('DISABLED', logger);
+            assert.equal(testee._applicationUpdateURL, undefined);
+            assert.equal(testee.isDisabled, true);
+        });
     });
 
     describe('getUpdateInfo()', function () {

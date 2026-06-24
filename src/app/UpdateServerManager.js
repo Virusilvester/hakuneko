@@ -7,14 +7,23 @@ const UpdatePackageInfo = require('./UpdatePackageInfo');
 module.exports = class UpdateServerManager {
 
     constructor(applicationUpdateURL, logger) {
+        this._logger = logger || new ConsoleLogger(ConsoleLogger.LEVEL.Warn);
+        this._disabled = applicationUpdateURL === 'DISABLED';
+        if(this._disabled) {
+            this._applicationUpdateURL = undefined;
+            return;
+        }
         try {
-            this._logger = logger || new ConsoleLogger(ConsoleLogger.LEVEL.Warn);
             new URL(applicationUpdateURL);
             this._applicationUpdateURL = applicationUpdateURL;
         } catch(error) {
             this._logger.warn('Initialization of "UpdateServerManager" failed!', error);
             this._applicationUpdateURL = undefined;
         }
+    }
+
+    get isDisabled() {
+        return this._disabled;
     }
 
     /**

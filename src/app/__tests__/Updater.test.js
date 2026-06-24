@@ -253,5 +253,17 @@ describe('Updater', function () {
             assert.equal(fs.existsSync(fixture.dummy.file), false);
             fixture.deleteMockDirectory();
         });
+
+        it('should keep cache when update checks are disabled', async () => {
+            fixture.createMockDirectory();
+            let serverManager = new UpdateServerManager('DISABLED', logger);
+            let cacheManager = new CacheDirectoryManager(fixture.applicationCacheDirectory, logger);
+            let testee = new Updater(serverManager, cacheManager, logger);
+            await testee.updateCache(publicKey);
+            assert.equal(fs.readFileSync(fixture.version.file, 'utf8'), fixture.version.content);
+            assert.equal(fs.readFileSync(fixture.dummy.file, 'utf8'), fixture.dummy.content);
+            assert.equal(fs.existsSync(fixture.index.file), false);
+            fixture.deleteMockDirectory();
+        });
     });
 });

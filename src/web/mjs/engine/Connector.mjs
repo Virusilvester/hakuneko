@@ -145,7 +145,7 @@ export default class Connector {
                 return Promise.resolve( [] );
             } )
             .then( existingMangaTitles => {
-                this.existingManga = existingMangaTitles;
+                this.existingMangas = existingMangaTitles;
                 // check if manga list is cached
                 return this.mangaCache && this.mangaCache.length ? this._getUpdatedMangasFromCache() : this._getUpdatedMangasFromFile();
             } )
